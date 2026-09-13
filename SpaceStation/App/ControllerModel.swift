@@ -21,6 +21,9 @@ final class ControllerModel {
     var info: HelperDeviceInfo?
     var led: LEDConfig?
     var helperInstalled = false
+    /// nil = not checked / not installed; false = registered but launchd does not start it.
+    var helperResponding: Bool?
+    var repairingHelper = false
     static let log = Logger(subsystem: "com.uiltonlopes.spacestation", category: "controller")
     var busy = false
     var lastError: String?
@@ -51,7 +54,7 @@ final class ControllerModel {
         refreshHelperStatus()
         monitor = USBMonitor { [weak self] in Task { @MainActor in self?.usbChanged() } }
         startPresencePoll()
-        Task { await refresh() }
+        Task { await checkHelperHealth(); await refresh() }
     }
 
     /// Debounced USB attach/detach handling: update `connection`; fetch details only when a pad appears.
@@ -97,6 +100,7 @@ final class ControllerModel {
 
     func refreshHelperStatus() {
         if #available(macOS 14.0, *) { helperInstalled = HelperClient.shared.status == .enabled }
+        if !helperInstalled { helperResponding = nil }
     }
 
     // MARK: Discovery
@@ -120,7 +124,9 @@ final class ControllerModel {
                 let l = try s.readLED()
                 return (HelperDeviceInfo(i), l, cur)
             case .xinput:
-                guard installed, #available(macOS 14.0, *) else { throw HelperError.notInstalled }
+                guard #available(macOS 14.0, *) else { throw HelperError.notInstalled }
+                guard installed else { throw HelperClient.shared.status == .requiresApproval ? HelperError.awaitingApproval : HelperError.notInstalled }
+                guard HelperClient.shared.isResponding() else { throw HelperError.notResponding }
                 let i = try HelperClient.shared.deviceInfo()
                 let cur = (try? HelperClient.shared.currentSlot()).flatMap { $0 < 4 ? $0 : nil }
                 return (i, try HelperClient.shared.readLED(slot: cur ?? remembered), cur)
@@ -557,6 +563,37 @@ final class ControllerModel {
         do { try HelperClient.shared.install() } catch { lastError = "\(error)" }
         refreshHelperStatus()
         if HelperClient.shared.status == .requiresApproval { HelperClient.shared.openLoginItemsSettings() }
+    }
+
+    /// A helper that is registered and approved can still be refused by macOS: on a development Mac the kernel
+    /// rejected it on every spawn (launch-constraint violation), and requests then blocked forever. Ping it at
+    /// launch with a timeout so Settings can say so. Re-registering did not clear that state, so it is not
+    /// done automatically; Settings › Privileged helper › Repair helper still offers it.
+    func checkHelperHealth() async {
+        guard #available(macOS 14.0, *) else { return }
+        refreshHelperStatus()
+        guard helperInstalled else { helperResponding = nil; return }
+        helperResponding = await Task.detached(operation: { HelperClient.shared.isResponding() }).value
+        if helperResponding == false {
+            Logger(subsystem: "com.uiltonlopes.spacestation", category: "helper").error("helper registered but not answering")
+        }
+    }
+
+    /// Unregister + register the daemon (see `HelperClient.reinstall`), then ask for approval if macOS wants it.
+    func repairHelper() async {
+        guard #available(macOS 14.0, *), !repairingHelper else { return }
+        repairingHelper = true; defer { repairingHelper = false }
+        let r: Result<Void, Error> = await Task.detached { Result { try HelperClient.shared.reinstall() } }.value
+        refreshHelperStatus()
+        if case .failure(let e) = r { lastError = "\(e)"; helperResponding = false; return }
+        if HelperClient.shared.status == .requiresApproval {
+            helperResponding = nil
+            lastError = String(localized: "Space Station registered its helper again. Approve it in System Settings › General › Login Items & Extensions, then come back.")
+            HelperClient.shared.openLoginItemsSettings()
+            return
+        }
+        helperResponding = await Task.detached(operation: { HelperClient.shared.isResponding() }).value
+        if helperResponding == true { lastError = nil; if connection == .xinput { await refresh() } }
     }
 
     func uninstallHelper() {

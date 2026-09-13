@@ -381,6 +381,16 @@
         }
       }
     },
+    "Approve the helper in System Settings › General › Login Items & Extensions.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aprove o helper em Ajustes do Sistema › Geral › Itens de Início e Extensões."
+          }
+        }
+      }
+    },
     "Automatic switching": {
       "localizations": {
         "pt-BR": {
@@ -3561,6 +3571,16 @@
         }
       }
     },
+    "Registered, but macOS does not start it. DInput mode works without the helper; Repair registers it again.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Registrado, mas o macOS não o inicia. O modo DInput funciona sem o helper; Reparar registra de novo."
+          }
+        }
+      }
+    },
     "Release": {
       "localizations": {
         "pt-BR": {
@@ -3627,6 +3647,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Renomear…"
+          }
+        }
+      }
+    },
+    "Repair helper": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reparar helper"
+          }
+        }
+      }
+    },
+    "Repairing…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reparando…"
           }
         }
       }
@@ -4247,6 +4287,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "O Space Station para Mac é gratuito e de código aberto, feito nas horas vagas fazendo engenharia reversa do controle. Se ele te poupou de instalar um Windows, você pode me pagar um café."
+          }
+        }
+      }
+    },
+    "Space Station registered its helper again. Approve it in System Settings › General › Login Items & Extensions, then come back.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Space Station registrou o helper de novo. Aprove em Ajustes do Sistema › Geral › Itens de Início e Extensões e volte ao app."
           }
         }
       }
@@ -5517,6 +5567,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "arquivo local"
+          }
+        }
+      }
+    },
+    "macOS did not start the helper. DInput mode works without it; Settings › Privileged helper › Repair helper registers it again.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O macOS não iniciou o helper. O modo DInput funciona sem ele; Ajustes › Helper privilegiado › Reparar helper registra de novo."
           }
         }
       }

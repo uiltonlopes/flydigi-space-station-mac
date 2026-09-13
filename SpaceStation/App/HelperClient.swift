@@ -2,16 +2,19 @@
 
 import Foundation
 import XPC
+import os
 import ServiceManagement
 import FlydigiKit
 import FlydigiHelperProtocol
 import FlydigiTransport
 
 enum HelperError: Error, CustomStringConvertible {
-    case notInstalled, remote(String), transport(String)
+    case notInstalled, awaitingApproval, notResponding, remote(String), transport(String)
     var description: String {
         switch self {
         case .notInstalled: return "Helper not installed. Install it from Settings."
+        case .awaitingApproval: return String(localized: "Approve the helper in System Settings › General › Login Items & Extensions.")
+        case .notResponding: return String(localized: "macOS did not start the helper. DInput mode works without it; Settings › Privileged helper › Repair helper registers it again.")
         case .remote(let s), .transport(let s): return s
         }
     }
@@ -31,6 +34,45 @@ final class HelperClient: @unchecked Sendable {
 
     func install() throws { try service.register() }
     func uninstall() throws { try service.unregister(); dropSession() }
+
+    /// Registers the daemon again. launchd keeps the code requirement of the binary that was registered, so
+    /// after an app update the old registration refuses to spawn the new helper (EX_CONFIG, "needs LWCR
+    /// update") until it is registered anew. `register()` on its own only answers "already registered", and
+    /// registering right after unregistering can fail with "Operation not permitted" — hence the waits.
+    func reinstall() throws {
+        queue.sync { dropSession() }
+        try? service.unregister()
+        var lastError: Error?
+        for wait in [1.0, 2.0, 3.0] {
+            Thread.sleep(forTimeInterval: wait)
+            do { try service.register(); return } catch {
+                if service.status == .enabled || service.status == .requiresApproval { return }
+                lastError = error
+            }
+        }
+        throw lastError ?? HelperError.notResponding
+    }
+
+    /// True when the daemon answers a ping within `timeout`. A registration that launchd cannot spawn never
+    /// replies (`sendSync` would block forever), so every first contact goes through this.
+    func isResponding(timeout: TimeInterval = 3) -> Bool {
+        guard status == .enabled else { return false }
+        return queue.sync {
+            do {
+                if session == nil {
+                    session = try XPCSession(machService: HelperConstants.machService, targetQueue: nil, options: [], cancellationHandler: nil)
+                }
+                let done = DispatchSemaphore(value: 0)
+                let answered = OSAllocatedUnfairLock(initialState: false)
+                try session!.send(HelperRequest.ping) { result in
+                    if case .success(let m) = result, let r = try? m.decode(as: HelperReply.self), case .pong = r { answered.withLock { $0 = true } }
+                    done.signal()
+                }
+                guard done.wait(timeout: .now() + timeout) == .success, answered.withLock({ $0 }) else { dropSession(); return false }
+                return true
+            } catch { dropSession(); return false }
+        }
+    }
     func openLoginItemsSettings() { SMAppService.openSystemSettingsLoginItems() }
 
     // MARK: Requests

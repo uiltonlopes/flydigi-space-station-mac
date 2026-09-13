@@ -477,11 +477,18 @@ struct SettingsPage: View {
                             }
                         }
                         section("Privileged helper") {
-                            Text(model.helperInstalled ? "Installed and registered with launchd." : "Not installed.").font(.system(size: 13)).foregroundStyle(.white)
+                            if !model.helperInstalled {
+                                Text("Not installed.").font(.system(size: 13)).foregroundStyle(.white)
+                            } else if model.helperResponding == false {
+                                Text("Registered, but macOS does not start it. DInput mode works without the helper; Repair registers it again.").font(.system(size: 13)).foregroundStyle(SS.yellow)
+                            } else {
+                                Text("Installed and registered with launchd.").font(.system(size: 13)).foregroundStyle(.white)
+                            }
                             Text("Runs as root only while talking to the controller in XInput mode, because Apple's Xbox driver owns the USB interface. Required for screen uploads, trigger previews and key capture in XInput.")
                                 .font(.system(size: 12)).foregroundStyle(SS.n300)
                             HStack(spacing: 8) {
                                 PrimaryButton(title: "Install helper", enabled: !model.helperInstalled) { model.installHelper() }
+                                GhostButton(title: model.repairingHelper ? "Repairing…" : "Repair helper", icon: "wrench.and.screwdriver", enabled: model.helperInstalled && !model.repairingHelper) { Task { await model.repairHelper() } }
                                 GhostButton(title: "Remove helper", enabled: model.helperInstalled, destructive: true) { model.uninstallHelper() }
                             }
                         }
@@ -713,6 +720,7 @@ struct SettingsView: View {
                 LabeledContent("Status", value: model.helperInstalled ? "Installed" : "Not installed")
                 HStack {
                     Button("Install helper") { model.installHelper() }.disabled(model.helperInstalled)
+                    Button("Repair helper") { Task { await model.repairHelper() } }.disabled(!model.helperInstalled || model.repairingHelper)
                     Button("Remove helper", role: .destructive) { model.uninstallHelper() }.disabled(!model.helperInstalled)
                 }
             }
