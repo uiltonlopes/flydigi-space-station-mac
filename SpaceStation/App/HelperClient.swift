@@ -12,7 +12,7 @@ enum HelperError: Error, CustomStringConvertible {
     case notInstalled, awaitingApproval, notResponding, remote(String), transport(String)
     var description: String {
         switch self {
-        case .notInstalled: return "Helper not installed. Install it from Settings."
+        case .notInstalled: return String(localized: "The helper is not installed. Install it in Settings › Privileged helper, or switch the controller to DInput.")
         case .awaitingApproval: return String(localized: "Approve the helper in System Settings › General › Login Items & Extensions.")
         case .notResponding: return String(localized: "macOS did not start the helper. DInput mode works without it; Settings › Privileged helper › Repair helper registers it again.")
         case .remote(let s), .transport(let s): return s

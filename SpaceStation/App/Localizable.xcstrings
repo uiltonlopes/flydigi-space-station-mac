@@ -4711,6 +4711,16 @@
         }
       }
     },
+    "The helper is not installed. Install it in Settings › Privileged helper, or switch the controller to DInput.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O helper não está instalado. Instale em Ajustes › Helper privilegiado ou mude o controle para DInput."
+          }
+        }
+      }
+    },
     "The profile could not be converted.": {
       "localizations": {
         "pt-BR": {

@@ -135,6 +135,7 @@ final class ControllerModel {
             }
         } onSuccess: { (i: HelperDeviceInfo, l: LEDConfig, cur: UInt8?) in
             self.info = i; self.led = l; self.padSlot = cur
+            if conn == .xinput { self.helperResponding = true }
             if let cur { UserDefaults.standard.set(Int(cur), forKey: "activeSlot") }
         }
         if let fw = info?.firmware, firmwareCheckedFor != fw { firmwareCheckedFor = fw; Task { await checkFirmware() } }
@@ -154,9 +155,13 @@ final class ControllerModel {
         guard connection != .none else { return }
         batteryReread?.cancel(); batteryReread = nil
         info = nil; led = nil; firmwareUpdate = nil; firmwareCheckedFor = nil
+        // In XInput every request goes through the helper: when it is the reason, say so instead of blaming the pad.
+        // The poll below keeps running, so the pad still shows up by itself once the helper works.
+        if let why = helperProblem { lastError = why } else {
         lastError = looksLikeReceiver
             ? String(localized: "Receiver connected. Turn the controller on (Home button) — it shows up by itself.")
             : String(localized: "The controller did not answer in time. Turn it on or reconnect the cable — it shows up by itself.")
+        }
         padPoll?.cancel()
         padPoll = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -560,6 +565,7 @@ final class ControllerModel {
 
     func installHelper() {
         guard #available(macOS 14.0, *) else { return }
+        if HelperClient.shared.status == .requiresApproval { HelperClient.shared.openLoginItemsSettings(); return }
         do { try HelperClient.shared.install() } catch { lastError = "\(error)" }
         refreshHelperStatus()
         if HelperClient.shared.status == .requiresApproval { HelperClient.shared.openLoginItemsSettings() }
@@ -626,8 +632,19 @@ final class ControllerModel {
                 lastError = String(localized: "The controller did not answer in time. Press refresh to try again.")
                 if info != nil { padWentSilent() }       // it was there a moment ago: turned off / out of range
             } else {
+                if let h = e as? HelperError, case .notResponding = h { helperResponding = false }
                 lastError = text
             }
+        }
+    }
+
+    /// Why XInput cannot reach the pad right now when the helper is the cause, nil otherwise.
+    private var helperProblem: String? {
+        guard connection == .xinput, #available(macOS 14.0, *) else { return nil }
+        switch HelperClient.shared.status {
+        case .enabled: return helperResponding == false ? HelperError.notResponding.description : nil
+        case .requiresApproval: return HelperError.awaitingApproval.description
+        default: return HelperError.notInstalled.description
         }
     }
 }
