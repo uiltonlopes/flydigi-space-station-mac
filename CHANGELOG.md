@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 — 2026-09-13
+
+The app no longer hangs when macOS refuses to start the privileged helper, and says why.
+
 - Fix: when macOS refuses to start the privileged helper, XInput mode no longer hangs waiting for it. The app pings the helper with a 3 s timeout before talking to the controller, Settings › Privileged helper says when the helper is registered but not running, and a **Repair helper** button registers it again. DInput mode keeps working without the helper. In XInput, a missing, unapproved or silent helper is now named as the reason instead of "the controller did not answer in time", and Install helper opens Login Items directly when macOS is waiting for approval.
 
 ## 0.2.1 — 2026-09-05

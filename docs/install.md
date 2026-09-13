@@ -19,6 +19,11 @@ app uses a small privileged helper that borrows the USB interface only while a c
 2. macOS opens *Login Items & Extensions*; allow **SpaceStationHelper** and enter your password once.
 3. Back in the app press the refresh icon. The sidebar should show your controller, firmware and battery.
 
+If the app says macOS did not start the helper, press **Repair helper** in the same section. If that does not help,
+macOS's background-items database holds a stale record: run `sfltool resetbtm`, restart the Mac, then install the
+helper again. The reset clears the background-item approvals of every app. See the wiki's
+[Troubleshooting](https://github.com/uiltonlopes/flydigi-space-station-mac/wiki/Troubleshooting-and-FAQ) page.
+
 Without the helper the app still works fully in **DInput** mode (switch with the Mode row on the device
 card or Settings → USB mode, or hold the controller's mode combination). The LCD upload always needs XInput + the cable.
 
