@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- `flydigi-probe` 0.2.3: sends the new-generation heartbeat as a raw 32-byte packet on the pad's XInput-class interface (where Space Station's `06 5A A5` frames appear to go) and counts the input packets that follow; on the vendor HID it tries report ids 3, 6 and 5 in turn. First reports from an Apex 5 and a Vader 4 Pro are summarised in docs/adding-a-controller.md §4.
+
 ## 0.2.2 — 2026-09-13
 
 The app no longer hangs when macOS refuses to start the privileged helper, and says why.

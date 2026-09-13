@@ -12,7 +12,7 @@ import IOKit.hid
 import IOKit.usb
 import FlydigiKit
 
-let version = "0.2.1"
+let version = "0.2.3"
 let seconds: Double = CommandLine.arguments.dropFirst().first.flatMap(Double.init) ?? 15
 let vendors: [Int] = [0x04B4, 0x37D7, 0x045E, 0x057E]   // classic DInput (Cypress), Flydigi's own VID, Xbox identity, Nintendo identity (Switch mode)
 nonisolated(unsafe) var report: [String] = []
@@ -29,7 +29,7 @@ func property(_ entry: io_registry_entry_t, _ key: String) -> Any? {
 func int(_ v: Any?) -> Int? { (v as? NSNumber)?.intValue }
 
 out("flydigi-probe \(version) · \(ProcessInfo.processInfo.operatingSystemVersionString) · \(ISO8601DateFormatter().string(from: Date()))")
-out("Read-only: nothing is written to the controller.")
+out("Read-only: only identity requests are sent; nothing is written to the controller's memory.")
 out("")
 
 // MARK: - 1. USB registry (what macOS sees before any driver)
@@ -168,7 +168,9 @@ final class RawUSB: @unchecked Sendable {
     let label: String
     var device: DevicePtr?
     var intf: InterfacePtr?
+    let vid: Int, pid: Int, interfaceNumber: Int
     var pipe: UInt8 = 0
+    var outPipe: UInt8 = 0
     var maxPacket: UInt16 = 64
     var thread: Thread?
     nonisolated(unsafe) var stop = false
@@ -176,6 +178,7 @@ final class RawUSB: @unchecked Sendable {
     var note: String?
     var deviceOpened = false
     init(_ d: USBDev, interfaceNumber: Int) {
+        vid = d.vid; pid = d.pid; self.interfaceNumber = interfaceNumber
         label = String(format: "%04x:%04x interface %d (XInput-class, raw USB)", d.vid, d.pid, interfaceNumber)
         do {
             var plugIn: UnsafeMutablePointer<UnsafeMutablePointer<IOCFPlugInInterface>?>?; var score: Int32 = 0
@@ -211,6 +214,7 @@ final class RawUSB: @unchecked Sendable {
                 var dir: UInt8 = 0, num: UInt8 = 0, type: UInt8 = 0, interval: UInt8 = 0, mp: UInt16 = 0
                 guard i.pointee!.pointee.GetPipeProperties(i, p, &dir, &num, &type, &mp, &interval) == kIOReturnSuccess else { continue }
                 if dir == UInt8(kUSBIn) && type == UInt8(kUSBInterrupt) { pipe = p; maxPacket = mp }
+                if dir == UInt8(kUSBOut) && type == UInt8(kUSBInterrupt) { outPipe = p }
             }
             guard pipe != 0 else { throw ProbeError("no interrupt IN pipe") }
         } catch { self.error = "\(error)" }
@@ -230,6 +234,13 @@ final class RawUSB: @unchecked Sendable {
         }
         thread?.start()
     }
+    /// One packet on the interrupt OUT pipe: a raw endpoint write, no HID report id.
+    func write(_ bytes: [UInt8]) -> IOReturn {
+        guard error == nil, let i = intf, outPipe != 0 else { return kIOReturnNotOpen }
+        var b = bytes
+        return b.withUnsafeMutableBytes { i.pointee!.pointee.WritePipeTO(i, outPipe, $0.baseAddress, UInt32($0.count), 500, 500) }
+    }
+    var packetCount: Int { cap.lock.lock(); defer { cap.lock.unlock() }; return cap.perId.values.reduce(0) { $0 + $1.count } }
     func finish() {
         stop = true; Thread.sleep(forTimeInterval: 0.7)
         if let i = intf { _ = i.pointee!.pointee.USBInterfaceClose(i); _ = i.pointee!.pointee.Release(UnsafeMutableRawPointer(i)) }
@@ -251,6 +262,23 @@ if !captures.isEmpty || rawReaders.contains(where: { $0.error == nil }) {
     // Identification queries, before the interfaces are cancelled. Both are what Space Station sends on connect.
     var infoLines: [String] = []
     func writeReport(_ d: IOHIDDevice, _ bytes: [UInt8]) -> IOReturn { bytes.withUnsafeBufferPointer { IOHIDDeviceSetReport(d, kIOHIDReportTypeOutput, CFIndex(bytes[0]), $0.baseAddress!, $0.count) } }
+    // New generation over the XInput-class interface itself. Space Station builds its NewXInput frames with a
+    // leading 06 and gets bare `5A A5 …` replies, which looks like a raw endpoint rather than a HID report (an
+    // Apex 5's vendor HID declares only report ids 3 and 4, and ignored a report-id-6 heartbeat).
+    let rawNew = rawReaders.filter { $0.error == nil && $0.vid == 0x37D7 }
+    if !rawNew.isEmpty { print("\n>>> Keep moving the sticks and pressing buttons for a few more seconds.") }
+    for r in rawNew {
+        infoLines.append(String(format: "== New-generation heartbeat on %04x:%04x interface %d (raw USB)", r.vid, r.pid, r.interfaceNumber))
+        guard r.outPipe != 0 else { infoLines.append("  no interrupt OUT pipe on this interface"); continue }
+        var frame = [UInt8](repeating: 0, count: 32); frame[0] = 6; frame[1] = 0x5A; frame[2] = 0xA5; frame[3] = 1; frame[4] = 2; frame[5] = 3
+        let before = r.packetCount
+        let kr = r.write(frame)
+        guard kr == kIOReturnSuccess else { infoLines.append(String(format: "  write on OUT pipe %d failed 0x%08x", r.outPipe, UInt32(bitPattern: kr))); continue }
+        Thread.sleep(forTimeInterval: 4)
+        r.cap.lock.lock(); let replies = r.cap.replies; r.cap.lock.unlock()
+        infoLines.append("  sent 32 B on OUT pipe \(r.outPipe); \(replies.count) reply packet(s); \(r.packetCount - before) input packet(s) in the 4 s after it")
+        for rep in replies { infoLines.append("    " + hex(rep)) }
+    }
     for (d, cap, _) in captures {
         let vid = int(hidProp(d, kIOHIDVendorIDKey)) ?? 0, pid = int(hidProp(d, kIOHIDProductIDKey)) ?? 0, page = int(hidProp(d, kIOHIDPrimaryUsagePageKey)) ?? 0
         guard page == 0xFFA0 else { continue }
@@ -266,21 +294,20 @@ if !captures.isEmpty || rawReaders.contains(where: { $0.error == nil }) {
                 } else { infoLines.append("  no device-info reply (\(replies.count) other replies)") }
             } else { infoLines.append(String(format: "  write failed 0x%08x", r)) }
         } else if vid == 0x37D7 {
-            // New generation: 32-byte frame `06 5A A5 <cmd 01> <len 02> <crc>` — Space Station's heartbeat.
-            infoLines.append(String(format: "== New-generation heartbeat (5A A5 01) on %04x:%04x", vid, pid))
-            var frame = [UInt8](repeating: 0, count: 32); frame[0] = 6; frame[1] = 0x5A; frame[2] = 0xA5; frame[3] = 1; frame[4] = 2; frame[5] = 3
-            var r = writeReport(d, frame)
-            var used = "report id 06"
-            if r != kIOReturnSuccess {            // the descriptor declares output report 03; try the same frame under it
-                frame[0] = 3; r = writeReport(d, frame); used = "report id 03 (06 was refused)"
-            }
-            if r == kIOReturnSuccess {
+            // Same heartbeat on the vendor HID: 3 is the output report its descriptor declares, 6 is Space Station's
+            // leading byte, 5 is what Flydigi's WebHID tool used. Stop at the first one that gets an answer.
+            infoLines.append(String(format: "== New-generation heartbeat (5A A5 01) on %04x:%04x vendor HID (usage ffa0)", vid, pid))
+            for id: UInt8 in [3, 6, 5] {
+                var frame = [UInt8](repeating: 0, count: 32); frame[0] = id; frame[1] = 0x5A; frame[2] = 0xA5; frame[3] = 1; frame[4] = 2; frame[5] = 3
+                cap.lock.lock(); let before = cap.replies.count; cap.lock.unlock()
+                let r = writeReport(d, frame)
+                guard r == kIOReturnSuccess else { infoLines.append(String(format: "  report id %02x: write failed 0x%08x", id, UInt32(bitPattern: r))); continue }
                 Thread.sleep(forTimeInterval: 1.5)
-                cap.lock.lock(); let replies = cap.replies; cap.lock.unlock()
-                infoLines.append("  sent with \(used); \(replies.count) reply packet(s):")
+                cap.lock.lock(); let replies = Array(cap.replies.dropFirst(before)); cap.lock.unlock()
+                infoLines.append(String(format: "  report id %02x: %d reply packet(s)", id, replies.count))
                 for rep in replies { infoLines.append("    " + hex(rep)) }
-                if replies.isEmpty { infoLines.append("    (none — the pad may answer on the XInput-class interface, see raw USB above)") }
-            } else { infoLines.append(String(format: "  write failed 0x%08x", r)) }
+                if !replies.isEmpty { break }
+            }
         }
     }
 

@@ -72,9 +72,23 @@ differs.
 
 ## 4. New protocol (`0x37D7`, "NewXInput")
 
-Apex 5/6, Vader 4 Pro and Vader 5 use report id 6 with `5A A5 <cmd> <len> … crc` framing and different
-command ids. That is a new `ProtocolVariant` with its own framing file, replies and tests. The HID side
-is unprivileged (no Apple driver claims VID `0x37D7`), so it may not even need the helper. Start from
+Pads that enumerate with VID `0x37D7` (Apex 5/6, Vader 5, and per Space Station's tables the Vader 4 Pro) use
+`5A A5 <cmd> <len> … crc` framing and different command ids. Space Station builds 32-byte frames that start with
+`06`, and the replies come back as bare `5A A5 …`. That is a new `ProtocolVariant` with its own framing file,
+replies and tests. Nothing Apple ships claims VID `0x37D7`, so it may not even need the helper.
+
+What owners' probe reports show so far (macOS 27, 2026-09-06):
+
+- **Apex 5**, wired and on its dongle: `37d7:2501`. Interface 0 is XInput-class (`ff/5d/01`) with no macOS
+  driver, so games on the Mac do not see the pad. Interface 1 is a keyboard/mouse HID. Interface 2 is the vendor
+  HID: usage page `0xFFA0` with output report id **3** and input report id **4**, 31 bytes each, plus the OTA
+  collection (`0xFFEF` wired, `0xFFEE` on the dongle). A heartbeat sent as HID report id 6 got no reply, and
+  interface 0 sent nothing during 15 s of button presses. So the leading `06` is most likely the first byte of a
+  raw packet on interface 0's OUT endpoint, not a HID report id. Probe 0.2.3 tests that, and report ids 3/6/5 on
+  the vendor HID.
+- **Vader 4 Pro**, firmware 6.9.5.5, wired: it does **not** use the new VID. It enumerates as the classic
+  `045e:028e` (Apple's driver, standard 20-byte report), and the app read its firmware and M1/M2 over the classic
+  protocol. Its device id is not in the catalog yet. Start from
 `docs/spacestation4-analysis.md` §4.1 and the official WebHID tool notes in `protocol.md` §7.
 
 ## 5. UI
