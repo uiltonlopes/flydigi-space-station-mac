@@ -27,6 +27,9 @@ helper again. The reset clears the background-item approvals of every app. See t
 Without the helper the app still works fully in **DInput** mode (switch with the Mode row on the device
 card or Settings → USB mode, or hold the controller's mode combination). The LCD upload always needs XInput + the cable.
 
+If nothing is found while Steam is open, quit Steam: on some controllers it takes exclusive ownership of the USB
+device (`UsbExclusiveOwner` in `ioreg`) and nothing else can open it.
+
 ## 3. Modes at a glance
 
 | | XInput (default) | DInput |

@@ -26,7 +26,7 @@ cd ~/Downloads && unzip -o flydigi-probe-*-macos.zip && ./flydigi-probe
 
 For 15 seconds press every button once, move both sticks in a circle, pull both triggers. The tool writes
 `flydigi-probe-<date>.txt` on your Desktop: USB and HID interfaces with their report descriptors, the input reports
-that changed, and the device info (classic `05 EC` query on Apex 4-family pads, new-generation `06 5A A5 01`
+that changed, and the device info (classic `05 EC` query on Apex 4-family pads, new-generation `5A A5 01`
 heartbeat on `0x37D7` pads). Interfaces that macOS has no driver for (the XInput-class interface 0 of the new
 generation) are read directly over USB, so the pad does not need to appear as a game controller. Switch-mode pads
 (Nintendo VID `0x057E`) are listed too. The only things sent to the controller are those two identity requests; nothing
@@ -41,7 +41,7 @@ cd FlydigiKit && swift build
 sudo .build/debug/apex4 info --channel xinput
 ```
 `device id` is Flydigi's `DeviceType`; the catalogue already knows most ids (names inferred where marked
-"?"). Note the VID/PID in each USB mode (`system_profiler SPUSBDataType`): `045e:028e` + `04b4:2412` means
+"?"). Note the VID/PID in each USB mode (`system_profiler SPUSBHostDataType`; the older `SPUSBDataType` prints nothing on macOS 26): `045e:028e` + `04b4:2412` means
 the classic protocol; VID `0x37D7` means the new one (see §4).
 
 ## 2. Same protocol family (classic `A5`/`05`)
@@ -72,24 +72,53 @@ differs.
 
 ## 4. New protocol (`0x37D7`, "NewXInput")
 
-Pads that enumerate with VID `0x37D7` (Apex 5/6, Vader 5, and per Space Station's tables the Vader 4 Pro) use
-`5A A5 <cmd> <len> … crc` framing and different command ids. Space Station builds 32-byte frames that start with
-`06`, and the replies come back as bare `5A A5 …`. That is a new `ProtocolVariant` with its own framing file,
-replies and tests. Nothing Apple ships claims VID `0x37D7`, so it may not even need the helper.
+Pads that enumerate with VID `0x37D7` (Apex 5/6, Vader 5 Pro) use `5A A5 <cmd> <len> … crc` framing and
+different command ids. That is a new `ProtocolVariant` with its own framing file, replies and tests. Nothing Apple
+ships claims VID `0x37D7`, and the config channel is a plain HID interface that opens without root, so it should
+not need the helper. (Space Station's tables also list the Vader 4 Pro here, but the hardware speaks the classic
+protocol — see below.)
 
-What owners' probe reports show so far (macOS 27, 2026-09-06):
+**Verified on a Vader 5 Pro** (`37d7:2401`, cable and dongle, macOS 26.5, by a contributor in
+[issue #1](https://github.com/uiltonlopes/flydigi-space-station-mac/issues/1)):
 
-- **Apex 5**, wired and on its dongle: `37d7:2501`. Interface 0 is XInput-class (`ff/5d/01`) with no macOS
-  driver, so games on the Mac do not see the pad. Interface 1 is a keyboard/mouse HID. Interface 2 is the vendor
-  HID: usage page `0xFFA0` with output report id **3** and input report id **4**, 31 bytes each, plus the OTA
-  collection (`0xFFEF` wired, `0xFFEE` on the dongle). A heartbeat sent as HID report id 6 got no reply, and
-  interface 0 sent nothing during 15 s of button presses. So the leading `06` is most likely the first byte of a
-  raw packet on interface 0's OUT endpoint, not a HID report id. Probe 0.2.3 tests that, and report ids 3/6/5 on
-  the vendor HID.
-- **Vader 4 Pro**, firmware 6.9.5.5, wired: it does **not** use the new VID. It enumerates as the classic
-  `045e:028e` (Apple's driver, standard 20-byte report), and the app read its firmware and M1/M2 over the classic
-  protocol. Its device id is not in the catalog yet. Start from
-`docs/spacestation4-analysis.md` §4.1 and the official WebHID tool notes in `protocol.md` §7.
+- The heartbeat is the bare frame `5A A5 01 02 03` padded to 32 bytes. Sent as an output report on the `0xFFA0`
+  vendor HID it is answered within ~10 ms by a 32-byte input report on the same HID, e.g. on the dongle
+  `5a a5 01 01 00 82 01 00 00 00 00 05 45 01 00 72 21 04 83 36 05 00 00 00 00 00 00 10 43 27 00 9f`.
+  Header `5A A5 <cmd> <total packets> <index>`; the last byte is the sum of bytes 2…30 mod 256.
+- **The report id comes from the pad's `0xFFA0` descriptor.** The Vader 5 Pro declares none (report id 0, frame
+  as-is); the Apex 5 declares output id **3** / input id **4** (31 bytes each), so there the frame goes out as
+  report 3. Space Station's leading `06` (analysis §4.1) is **not** part of the frame the pad accepts:
+  `06 5A A5 …` got no reply on the HID nor on interface 0's OUT endpoint. The bare frame on interface 0's OUT
+  endpoint is also answered — on the `0xFFA0` HID, not on interface 0.
+- Reply fields, partly decoded from the cable/dongle differences and the field order in Space Station's parser
+  (device, connection, MAC, battery, chip, motion, firmware, dongle/switch/trigger/screen versions): byte 5 =
+  device id (`0x82` = 130 = Vader 5 Pro), byte 6 = `01` on the dongle / `00` on the cable, byte 11 = battery
+  (`05` = full; `25` on the cable, high nibble probably "charging"), bytes 17–18 = `04 83` only on the dongle
+  (receiver version?). Firmware is probably around bytes 14–16; unconfirmed until matched against the version the
+  pad displays.
+- Interface 0 (`ff/5d/01`, no macOS driver) streams the standard 20-byte Xbox 360 report (`00 14 …`, buttons in
+  bytes 2–3, triggers 4–5, four 16-bit stick axes 6–13). On the **cable** it stays silent until the Xbox 360 start
+  handshake — the three vendor IN control requests Linux `xpad` sends (`C1 01 0100`, `C1 01 0000`, `C0 01 0000`);
+  the dongle streams without it.
+- Cable and dongle enumerate identically (same VID:PID, name and four interfaces); only the OTA HID's usage page
+  differs: `0xFFEF` wired, `0xFFEE` on the dongle. The dongle does not enumerate while the pad is off.
+- While Steam is running it holds the whole device (`UsbExclusiveOwner = … steam_osx` in `ioreg`) and interface 0
+  cannot be opened. Quit Steam before probing.
+- IOUSBLib: `ReadPipeTO`/`WritePipeTO` are bulk-only and return `kIOReturnBadArgument` (`0xe00002c2`) on these
+  interrupt pipes; use `ReadPipe` + `AbortPipe` and `WritePipe`, as `USBTransport.swift` does. flydigi-probe ≤ 0.2.3
+  used the TO variants and printed "no input reports" for interface 0 for that reason; its Apex 5 result below is
+  invalid on that point.
+
+**Apex 5** (`37d7:2501`, wired and on its dongle, macOS 27): interface 0 XInput-class with no driver, interface 1 a
+keyboard/mouse HID, interface 2 the vendor HID with `0xFFA0` (output report id 3, input id 4, 31 bytes) plus the
+OTA collection (`0xFFEF` wired, `0xFFEE` dongle). A heartbeat sent as report id 6 got no reply, which the Vader
+result explains; report id 3 with the bare frame has not been tried on it yet.
+
+**Vader 4 Pro** (firmware 6.9.5.5, wired) does **not** use the new VID: it enumerates as the classic `045e:028e`
+(Apple's driver, 20-byte report) and the app read its firmware and M1/M2 over the classic protocol. Its device id is
+not in the catalog yet.
+
+Start from `docs/spacestation4-analysis.md` §4.1 and the notes in `protocol.md` §7.
 
 ## 5. UI
 

@@ -227,8 +227,9 @@ Flydigi's official WebHID tool (`hid2.flydigi.com`, a "device ID correction" uti
 devices with Flydigi's own vendor id **`0x37D7`** using report id 5 and a different framing:
 `5A A5 <cmd> <len+2> <payload…> <crc>`. The Apex 4 (fw 6.8.x) does not enumerate with that VID, but the
 `5A A5` family is the same one the Apex 4 uses for screen replies — expect newer firmware/products to
-converge on it. Space Station itself starts these frames with `06`, and an Apex 5's USB descriptor declares
-output report 3 / input report 4 on `0xFFA0`; see `adding-a-controller.md` §4 for what that means.
+converge on it. Space Station's code starts these frames with `06`, but a Vader 5 Pro ignores `06 5A A5 …` and answers the bare
+`5A A5 …` frame sent as an HID output report whose id follows the pad's `0xFFA0` descriptor (none on the Vader 5
+Pro, 3 on the Apex 5). Frame, reply layout and the cable handshake: `adding-a-controller.md` §4.
 
 ## 8. Legacy / other
 - Apex 3 (`k1`, deviceId 24) uses a different screen protocol (`05 F0/F1`, 20-byte packets, w/h in

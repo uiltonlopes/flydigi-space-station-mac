@@ -106,6 +106,11 @@ report id 6, not 5, on USB). There is no k2 code path on the new framing, and th
 still serves a Telink `6.8.x` image (§6), so a k2 migration to `5A A5` is not in evidence.
 `Controller.IsOldProtocol()` is literally `VendorId != 0x37D7` **[verified]**.
 
+**Hardware note (2026-09-14):** a Vader 5 Pro ignores `06 5A A5 …` and answers the bare `5A A5 …` frame sent as
+HID report 0 on `0xFFA0` (its descriptor declares no report ids; the Apex 5 declares out 3 / in 4). So the `06` in
+`TakeEndpointByDevice` is a Windows-side or device-specific artefact, not part of the wire frame — see
+`adding-a-controller.md` §4.
+
 ### 4.2 k2 command inventory in SS4 (XInput / DInput variants)
 
 From `Flydigi.ControllerSDK.data.command.*` **[verified]**. `=` marks commands identical to

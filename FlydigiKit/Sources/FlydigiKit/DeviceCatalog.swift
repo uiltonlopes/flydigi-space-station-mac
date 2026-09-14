@@ -12,7 +12,7 @@ public struct DeviceDescriptor: Sendable, Hashable, Identifiable {
     public enum ProtocolVariant: String, Sendable {
         /// `A5 <cmd> … crc` over XInput (045e:028e) and `05 <cmd>` over DInput (04b4:2412). Apex 4 and older.
         case classic
-        /// `06 5A A5 <cmd> <len> … crc` on report id 6 with Flydigi's own VID `0x37D7` (Apex 5/6, Vader 5, Vader 4 Pro). Not implemented.
+        /// `5A A5 <cmd> <len> … crc` in 32-byte reports on the `0xFFA0` HID (report id per descriptor) with Flydigi's own VID `0x37D7` (Apex 5/6, Vader 5 Pro). Not implemented; docs/adding-a-controller.md §4.
         case newXInput
     }
 
@@ -80,7 +80,8 @@ public enum DeviceCatalog {
         let newer: [(UInt8, String, String, DeviceDescriptor.Family)] = [
             (128, "k5", "Flydigi Apex 5", .apex5), (129, "k5", "Flydigi Apex 5 EVA", .apex5), (133, "k5", "Flydigi Apex 5 MM", .apex5), (134, "k5", "Flydigi Apex 5 SRS", .apex5), (135, "k5", "Flydigi Apex 5 GS", .apex5), (136, "k5", "Flydigi Apex 5 LZ", .apex5),
             (132, "fp4", "Flydigi Vader 4 Pro", .vader4pro), (146, "fp4", "Flydigi Vader 4 Pro GS", .vader4pro), (147, "fp4", "Flydigi Vader 4 Pro JDB", .vader4pro), (148, "fp4", "Flydigi Vader 4 Pro MRFZ", .vader4pro),
-            (130, "f5", "Flydigi Vader 5", .vader5), (144, "f5", "Flydigi Vader 5 DBZ", .vader5), (145, "f5", "Flydigi Vader 5 HK3", .vader5),
+            // 130 is the Vader 5 Pro: confirmed from its heartbeat reply (0x82) and USB product string, issue #1.
+            (130, "f5", "Flydigi Vader 5 Pro", .vader5), (144, "f5", "Flydigi Vader 5 DBZ", .vader5), (145, "f5", "Flydigi Vader 5 HK3", .vader5),
             (149, "k6", "Flydigi Apex 6?", .other), (150, "k6", "Flydigi Apex 6 Pro?", .other),
         ]
         return classic.map { DeviceDescriptor(id: $0.0, code: $0.1, name: $0.2, family: $0.3, protocolVariant: .classic, support: .unsupported, capabilities: classicNoScreen) }
