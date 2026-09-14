@@ -70,53 +70,86 @@ the classic protocol; VID `0x37D7` means the new one (see §4).
 `Screen.width/height/maxFrames` per descriptor, and extend `ScreenUploadPlan` only if the command set
 differs.
 
-## 4. New protocol (`0x37D7`, "NewXInput")
+## 4. New protocol (`0x37D7`, "NewXInput"; SDL calls it V2)
 
-Pads that enumerate with VID `0x37D7` (Apex 5/6, Vader 5 Pro) use `5A A5 <cmd> <len> … crc` framing and
-different command ids. That is a new `ProtocolVariant` with its own framing file, replies and tests. Nothing Apple
-ships claims VID `0x37D7`, and the config channel is a plain HID interface that opens without root, so it should
-not need the helper. (Space Station's tables also list the Vader 4 Pro here, but the hardware speaks the classic
-protocol — see below.)
+Pads that enumerate with VID `0x37D7` (Apex 5/6, Vader 5 Pro) use `5A A5 <cmd> <len> …` framing and different
+command ids. That is a new `ProtocolVariant` with its own framing file, replies and tests. Nothing Apple ships
+claims VID `0x37D7`, and the config channel is a plain HID interface that opens without root, so it should not need
+the helper. (Space Station's tables also list an `fp4` code here; the Vader 4 Pro hardware met so far speaks the
+classic protocol — see below.)
 
-**Verified on a Vader 5 Pro** (`37d7:2401`, cable and dongle, macOS 26.5, by a contributor in
-[issue #1](https://github.com/uiltonlopes/flydigi-space-station-mac/issues/1)):
+Two independent sources agree on the wire format: a contributor's measurements on a **Vader 5 Pro** (`37d7:2401`,
+firmware 7.2.2.1, cable and dongle, macOS 26.5, [issue #1](https://github.com/uiltonlopes/flydigi-space-station-mac/issues/1)) and SDL's Flydigi HID driver
+([`SDL_hidapi_flydigi.c`](https://github.com/libsdl-org/SDL/blob/main/src/joystick/hidapi/SDL_hidapi_flydigi.c), zlib licence — used as a reference, no code copied).
 
-- The heartbeat is the bare frame `5A A5 01 02 03` padded to 32 bytes. Sent as an output report on the `0xFFA0`
-  vendor HID it is answered within ~10 ms by a 32-byte input report on the same HID, e.g. on the dongle
-  `5a a5 01 01 00 82 01 00 00 00 00 05 45 01 00 72 21 04 83 36 05 00 00 00 00 00 00 10 43 27 00 9f`.
-  Header `5A A5 <cmd> <total packets> <index>`; the last byte is the sum of bytes 2…30 mod 256.
-- **The report id comes from the pad's `0xFFA0` descriptor.** The Vader 5 Pro declares none (report id 0, frame
-  as-is); the Apex 5 declares output id **3** / input id **4** (31 bytes each), so there the frame goes out as
-  report 3. Space Station's leading `06` (analysis §4.1) is **not** part of the frame the pad accepts:
-  `06 5A A5 …` got no reply on the HID nor on interface 0's OUT endpoint. The bare frame on interface 0's OUT
-  endpoint is also answered — on the `0xFFA0` HID, not on interface 0.
-- Reply fields, partly decoded from the cable/dongle differences and the field order in Space Station's parser
-  (device, connection, MAC, battery, chip, motion, firmware, dongle/switch/trigger/screen versions): byte 5 =
-  device id (`0x82` = 130 = Vader 5 Pro), byte 6 = `01` on the dongle / `00` on the cable, byte 11 = battery
-  (`05` = full; `25` on the cable, high nibble probably "charging"), bytes 17–18 = `04 83` only on the dongle
-  (receiver version?). Firmware is probably around bytes 14–16; unconfirmed until matched against the version the
-  pad displays.
-- Interface 0 (`ff/5d/01`, no macOS driver) streams the standard 20-byte Xbox 360 report (`00 14 …`, buttons in
-  bytes 2–3, triggers 4–5, four 16-bit stick axes 6–13). On the **cable** it stays silent until the Xbox 360 start
-  handshake — the three vendor IN control requests Linux `xpad` sends (`C1 01 0100`, `C1 01 0000`, `C0 01 0000`);
-  the dongle streams without it.
-- Cable and dongle enumerate identically (same VID:PID, name and four interfaces); only the OTA HID's usage page
-  differs: `0xFFEF` wired, `0xFFEE` on the dongle. The dongle does not enumerate while the pad is off.
-- While Steam is running it holds the whole device (`UsbExclusiveOwner = … steam_osx` in `ioreg`) and interface 0
-  cannot be opened. Quit Steam before probing.
-- IOUSBLib: `ReadPipeTO`/`WritePipeTO` are bulk-only and return `kIOReturnBadArgument` (`0xe00002c2`) on these
-  interrupt pipes; use `ReadPipe` + `AbortPipe` and `WritePipe`, as `USBTransport.swift` does. flydigi-probe ≤ 0.2.3
-  used the TO variants and printed "no input reports" for interface 0 for that reason; its Apex 5 result below is
-  invalid on that point.
+**Transport.** Commands are 32-byte HID output reports on the `0xFFA0` interface; replies and the optional input
+stream are 32-byte input reports on the same interface. **The report id follows the pad's descriptor:** the Apex 5
+(`37d7:2501`) declares output id **3** / input id **4**, the Vader 5 Pro declares none, so there the frame goes out
+as report 0 exactly as written (SDL hard-codes id 3 and zeroes it for product `0x2401`). Space Station's leading
+`06` (analysis §4.1) is **not** accepted: `06 5A A5 …` got no reply on the HID nor on interface 0's OUT endpoint.
+The bare frame written to interface 0's OUT endpoint is also answered — on the `0xFFA0` HID.
 
-**Apex 5** (`37d7:2501`, wired and on its dongle, macOS 27): interface 0 XInput-class with no driver, interface 1 a
-keyboard/mouse HID, interface 2 the vendor HID with `0xFFA0` (output report id 3, input id 4, 31 bytes) plus the
-OTA collection (`0xFFEF` wired, `0xFFEE` dongle). A heartbeat sent as report id 6 got no reply, which the Vader
-result explains; report id 3 with the bare frame has not been tried on it yet.
+**Commands** (`5A A5 <cmd> <len> <payload…>`, `len` = payload bytes + 2; the info request is answered with `03` or
+`00` as its last byte, so a checksum is at least not enforced there):
+
+| cmd | name | frame | reply |
+|---|---|---|---|
+| `01` | get info | `5A A5 01 02 00` | `5A A5 01 <total> <index> …`, fields below |
+| `10` | get status | `5A A5 10` | byte 9 = 1 → third-party takeover allowed |
+| `11` | status changed (pad → host) | — | re-send get status |
+| `12` | rumble | `5A A5 12 06 <low> <high> 00 00 00` | — |
+| `1C` | acquire controller | `5A A5 1C 17 <1/0> "SDL" 00…` (the name is free text) | bytes 5–6; afterwards the pad streams `EF` |
+| `EF` | input report (pad → host) | — | see below |
+
+**Info reply** — `5a a5 01 01 00 82 01 00 00 00 00 05 45 01 00 72 21 04 83 36 05 00 00 00 00 00 00 10 43 27 00 9f`
+on the dongle; last byte = sum of bytes 2…30 mod 256:
+
+| bytes | field | notes |
+|---|---|---|
+| 5 | device id | `0x82` = 130 = Vader 5 Pro |
+| 6 | connection | SDL reads 1 = wired, 2 = wireless; this pad sent `00` on the cable, `01` on the dongle |
+| 11 | battery | high nibble 0 = on battery, 1 = charging, 2 = charged; low nibble = level × 20 %. `05` = 100 % on battery, `25` = charged |
+| 15–16 | firmware | one nibble per digit: `72 21` = 7.2.2.1 (SDL: `LOAD16(data[16], data[15])`) |
+| 17–18 | receiver firmware | `04 83` = 0.4.8.3; `00 00` on the cable |
+| 19–20 | SI firmware | `36 05` = 3.6.0.5 |
+| 27–28 | RF firmware | `10 43` = 1.0.4.3 |
+
+SDL refuses firmware below 7.0.3.1 on the Apex 5 and 7.1.4.1 on the Vader 5 Pro. The contributor had to update
+theirs on Windows before Space Station's edit mode would assign buttons at all, so expect older firmware to behave
+differently.
+
+**Input over HID.** After `acquire` (SDL re-sends it and the info request every 30 s) the pad emits `5A A5 EF …`
+reports on `0xFFA0`: sticks as little-endian int16 at bytes 3–10 (Y axes inverted), buttons at 11 (d-pad in the low
+nibble; A `10`, B `20`, Back `40`, X `80`), 12 (Y `01`, Start `02`, LB `04`, RB `08`, LS `40`, RS `80`), 13 (M1 `04`,
+M2 `08`, M3 `10`, M4 `20`, C `01`, Z `02`, LM `40`, RM `80`), 14 (Guide `08`, circle `01`), triggers 15–16, gyro
+17–22, accelerometer 23–28. It only works while **"Allow third-party apps to take over mappings"** is enabled in
+Space Station (its `AcquireController`, see the analysis doc); otherwise `get status` answers 0. That is the path to
+gamepad input on macOS without an XInput driver — not needed for configuration, but it shows what the channel does.
+
+**Interface 0** (`ff/5d/01`, no macOS driver) streams the standard 20-byte Xbox 360 report (`00 14 …`, buttons in
+bytes 2–3, triggers 4–5, four 16-bit stick axes 6–13). On the **cable** it stays silent until the Xbox 360 start
+handshake — the three vendor IN control requests Linux `xpad` sends (`C1 01 0100`, `C1 01 0000`, `C0 01 0000`);
+the dongle streams without it.
+
+**Also observed.** Cable and dongle enumerate identically; only the OTA HID's usage page differs (`0xFFEF` wired,
+`0xFFEE` dongle), and the dongle does not enumerate while the pad is off. While Steam is running it holds the whole
+device (`UsbExclusiveOwner = … steam_osx` in `ioreg`) and interface 0 cannot be opened. IOUSBLib's
+`ReadPipeTO`/`WritePipeTO` are bulk-only and return `kIOReturnBadArgument` (`0xe00002c2`) on these interrupt pipes;
+use `ReadPipe` + `AbortPipe` and `WritePipe`, as `USBTransport.swift` does. flydigi-probe ≤ 0.2.3 used the TO variants
+and printed "no input reports" for interface 0 for that reason.
+
+**Device ids SDL knows from hardware:** 19 Apex 2; 24/26/29 Apex 3; 84 Apex 4; 20/21/23 Vader 2; 22 Vader 2 Pro;
+28 Vader 3; 80/81 Vader 3 Pro; **85/91/105 Vader 4 Pro** (classic protocol); 128/129/133/134 Apex 5; 130 Vader 5 Pro.
+The catalog follows that; Space Station's `fp4` ids (132, 146–148) stay listed as inferred.
+
+**Apex 5** (`37d7:2501`, wired and on its dongle): interface 0 XInput-class with no driver, interface 1 a
+keyboard/mouse HID, interface 2 the vendor HID with `0xFFA0` (output report id 3, input id 4, 31 bytes) plus the OTA
+collection. A heartbeat sent as report id 6 got no reply, which the Vader result explains; report id 3 with the bare
+frame — what SDL does — has not been tried on it yet.
 
 **Vader 4 Pro** (firmware 6.9.5.5, wired) does **not** use the new VID: it enumerates as the classic `045e:028e`
-(Apple's driver, 20-byte report) and the app read its firmware and M1/M2 over the classic protocol. Its device id is
-not in the catalog yet.
+(Apple's driver, 20-byte report) and the app read its firmware and M1/M2 over the classic protocol. SDL maps device
+ids 85, 91 and 105 to it.
 
 Start from `docs/spacestation4-analysis.md` §4.1 and the notes in `protocol.md` §7.
 

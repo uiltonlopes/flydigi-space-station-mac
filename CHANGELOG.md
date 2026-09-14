@@ -2,7 +2,8 @@
 
 ## Unreleased
 - New generation, verified on a Vader 5 Pro by a contributor (issue #1): the heartbeat is the bare `5A A5 01 02 03` frame, sent as an HID output report whose id follows the pad's `0xFFA0` descriptor (none on the Vader 5 Pro, 3 on the Apex 5); Space Station's leading `06` gets no reply. The cable needs the Xbox 360 start handshake before interface 0 streams; Steam holds the device exclusively while it runs. Reply fields partly decoded. docs/adding-a-controller.md §4 has the details; `system_profiler SPUSBHostDataType` replaces the old data type on macOS 26.
-- Device catalog: id 130 is the Vader 5 Pro (from its heartbeat reply).
+- Device catalog: id 130 is the Vader 5 Pro (from its heartbeat reply); ids 85, 91 and 105 are the Vader 4 Pro (classic protocol, per SDL's Flydigi driver); Space Station's `fp4` ids stay marked as inferred.
+- New generation, cross-checked with SDL's Flydigi HID driver: report id 3 on the Apex 5 and unnumbered on the Vader 5 Pro, the info reply's fields (device id, connection, battery nibbles, four firmware versions as BCD), the acquire / status / rumble / input-report commands and SDL's minimum firmware versions are now in docs/adding-a-controller.md §4.
 - Known issue: `flydigi-probe` 0.2.3 reads interface 0 with `ReadPipeTO`, which fails on interrupt pipes, so its "no input reports" on `0x37D7` pads is wrong, and it never tries report id 0 for the heartbeat. Fix coming through issue #1.
 - `flydigi-probe` 0.2.3: sends the new-generation heartbeat as a raw 32-byte packet on the pad's XInput-class interface (where Space Station's `06 5A A5` frames appear to go) and counts the input packets that follow; on the vendor HID it tries report ids 3, 6 and 5 in turn. First reports from an Apex 5 and a Vader 4 Pro are summarised in docs/adding-a-controller.md §4.
 
