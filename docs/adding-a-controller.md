@@ -29,8 +29,9 @@ For 15 seconds press every button once, move both sticks in a circle, pull both 
 that changed, and the device info (classic `05 EC` query on Apex 4-family pads, new-generation `5A A5 01`
 heartbeat on `0x37D7` pads). Interfaces that macOS has no driver for (the XInput-class interface 0 of the new
 generation) are read directly over USB, so the pad does not need to appear as a game controller. Switch-mode pads
-(Nintendo VID `0x057E`) are listed too. The only things sent to the controller are those two identity requests; nothing
-is written to its memory. Send the file with the model, firmware version and connection type in an issue or a DM.
+(Nintendo VID `0x057E`) are listed too. The only things sent to the controller are those two identity requests and,
+on `0x37D7` pads, the Xbox 360 start handshake (three read requests; a wired Vader 5 Pro sends no input without them);
+nothing is written to its memory. Quit Steam first (⌘Q): while it runs it holds the pad, and the probe stops and says so. Send the file with the model, firmware version and connection type in an issue or a DM.
 Run it once per controller and once per USB mode if the pad has a mode switch.
 
 ## 1. Identify the pad
