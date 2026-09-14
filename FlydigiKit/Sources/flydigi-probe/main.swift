@@ -28,17 +28,29 @@ func property(_ entry: io_registry_entry_t, _ key: String) -> Any? {
     IORegistryEntryCreateCFProperty(entry, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
 }
 func int(_ v: Any?) -> Int? { (v as? NSNumber)?.intValue }
-/// Report ids a HID report descriptor uses for its Output items; `[0]` when it declares none (the Vader 5 Pro's 0xFFA0).
-func outputReportIDs(_ d: [UInt8]) -> [UInt8] {
-    var ids = Set<UInt8>(), current: UInt8 = 0, i = 0
+/// Report ids a HID report descriptor uses for Output items inside the top-level collection whose usage page is
+/// `page`; `[0]` when that collection declares none (the Vader 5 Pro's 0xFFA0), `[]` when there is no such
+/// collection. Other collections on the same interface are skipped on purpose: the Apex 5 keeps its 0xFFEF
+/// firmware-update collection (output report 8) in the same descriptor as 0xFFA0, and the heartbeat must not go there.
+func outputReportIDs(_ d: [UInt8], usagePage page: Int) -> [UInt8] {
+    var ids = Set<UInt8>(), reportID: UInt8 = 0, currentPage = 0, depth = 0, inWanted = false, sawWanted = false, i = 0
     while i < d.count {
         let prefix = d[i]
         if prefix == 0xFE { i += 3 + (i + 1 < d.count ? Int(d[i + 1]) : 0); continue }   // long item
         let size = [0, 1, 2, 4][Int(prefix & 3)]
-        if prefix & 0xFC == 0x84, i + 1 < d.count { current = d[i + 1] }                 // Report ID
-        if prefix & 0xFC == 0x90 { ids.insert(current) }                                   // Output
+        var data = 0
+        for k in 0..<size where i + 1 + k < d.count { data |= Int(d[i + 1 + k]) << (8 * k) }
+        switch prefix & 0xFC {
+        case 0x04: currentPage = data                                                                 // Usage Page (global)
+        case 0x84: reportID = UInt8(truncatingIfNeeded: data)                                         // Report ID (global)
+        case 0xA0: if depth == 0 { inWanted = currentPage == page; sawWanted = sawWanted || inWanted }; depth += 1   // Collection
+        case 0xC0: depth -= 1                                                                          // End Collection
+        case 0x90: if inWanted { ids.insert(reportID) }                                                // Output
+        default: break
+        }
         i += 1 + size
     }
+    guard sawWanted else { return [] }
     return ids.isEmpty ? [0] : ids.sorted()
 }
 /// New-generation heartbeat reply fields, checked on a Vader 5 Pro against the versions Flydigi's app shows
@@ -376,7 +388,7 @@ if !captures.isEmpty || rawReaders.contains(where: { $0.error == nil }) {
             let descriptor = (hidProp(d, kIOHIDReportDescriptorKey) as? Data).map { [UInt8]($0) } ?? []
             let size = int(hidProp(d, kIOHIDMaxOutputReportSizeKey)) ?? 32
             infoLines.append(String(format: "== New-generation heartbeat (5A A5 01) on %04x:%04x vendor HID (usage ffa0)", vid, pid))
-            for id in outputReportIDs(descriptor) {
+            for id in outputReportIDs(descriptor, usagePage: 0xFFA0) {
                 let report = id == 0 ? padded(heartbeat, size) : [id] + padded(heartbeat, size - 1)
                 let before = Capture.log.count
                 let r = report.withUnsafeBufferPointer { IOHIDDeviceSetReport(d, kIOHIDReportTypeOutput, CFIndex(id), $0.baseAddress!, $0.count) }
